@@ -1,0 +1,6 @@
+/aegean
+/aegean.exe
+/dist/
+/coverage.out
+*.test
+.DS_Store

@@ -1,0 +1,150 @@
+# goreleaser config for the `aegean` CLI.
+#
+# Local dry-run:   goreleaser release --snapshot --clean --skip=publish
+# Tag-driven prod: tag `cli-v<X.Y.Z>` on origin, Jenkins job runs
+#                  `goreleaser release --clean`.
+#
+# Channels covered today: GitHub Release (tarballs + .deb + .rpm + checksums),
+# Homebrew tap PR. Scoop / winget land in v0.2 — placeholder blocks below
+# stay commented until the org repos exist.
+
+version: 2
+
+project_name: aegean
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: aegean
+    main: ./cmd/aegean
+    binary: aegean
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.CommitDate}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}darwin{{- else if eq .Os "linux" }}linux{{- else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}amd64{{- else if eq .Arch "arm64" }}arm64{{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
+  algorithm: sha256
+
+nfpms:
+  - id: aegean-cli
+    package_name: aegean-cli
+    vendor: Aegean Cloud Engine
+    homepage: https://aegeanengine.com
+    maintainer: Aegean Engineering <engineering@aegeanengine.com>
+    description: |-
+      Aegean Cloud Engine command-line interface — manage accounts, API keys,
+      custom sender domains, and send transactional email/SMS/voice.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    section: utils
+    priority: optional
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/aegean/README.md
+        file_info:
+          mode: 0644
+
+brews:
+  - name: aegean
+    ids:
+      - default
+    repository:
+      owner: Aegean-Robotics
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://aegeanengine.com
+    description: Aegean Cloud Engine command-line interface
+    license: MIT
+    install: |
+      bin.install "aegean"
+    test: |
+      assert_match "aegean", shell_output("#{bin}/aegean version")
+
+# Cosign keyless signing of artifacts + checksums.
+# Requires GH OIDC token in the release runner; gated by env to keep
+# `goreleaser release --snapshot` working locally without a key.
+signs:
+  - cmd: cosign
+    env:
+      - COSIGN_EXPERIMENTAL=1
+    certificate: "${artifact}.pem"
+    signature: "${artifact}.sig"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - --yes
+    artifacts: checksum
+
+release:
+  draft: false
+  prerelease: auto
+  name_template: "aegean CLI v{{ .Version }}"
+  footer: |
+    ## Install
+
+    ```bash
+    # macOS / Linux — Homebrew
+    brew install Aegean-Robotics/tap/aegean
+
+    # Linux — curl + sha256-verified tarball
+    curl -fsSL https://aegeanengine.com/install.sh | sh
+
+    # Debian / Ubuntu
+    curl -fsSLO https://github.com/{{ .Env.GITHUB_REPOSITORY }}/releases/download/{{ .Tag }}/aegean-cli_{{ .Version }}_amd64.deb
+    sudo dpkg -i aegean-cli_{{ .Version }}_amd64.deb
+    ```
+
+    Cosign verification (optional, recommended):
+
+    ```bash
+    cosign verify-blob \
+      --certificate aegean_{{ .Version }}_SHA256SUMS.pem \
+      --signature   aegean_{{ .Version }}_SHA256SUMS.sig \
+      aegean_{{ .Version }}_SHA256SUMS
+    ```
+
+# Future blocks — wire up once the org repos exist.
+# scoops:
+#   - repository: { owner: aegeanengine, name: scoop-bucket }
+# winget:
+#   - publisher: aegean-robotics
+#     name: aegean
