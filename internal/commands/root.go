@@ -43,6 +43,7 @@ func NewRoot(info BuildInfo) *cobra.Command {
 	root.AddCommand(newSendCmd(&flags))
 	root.AddCommand(newLogsCmd(&flags))
 	root.AddCommand(newConfigCmd(&flags))
+	root.AddCommand(newSitesCmd(&flags))
 
 	return root
 }

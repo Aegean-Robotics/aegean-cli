@@ -111,3 +111,87 @@ func (c *Client) ListLogs(ctx context.Context, page, size int) (*LogsPage, error
 	}
 	return &out, nil
 }
+
+// ─── Sites (Phase 1-4b) ──────────────────────────────────────────────────────
+
+// ListSites returns every Site visible to the current account.
+func (c *Client) ListSites(ctx context.Context) ([]Site, error) {
+	var out []Site
+	if err := c.Do(ctx, http.MethodGet, "/api/sites", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// FindSite resolves a slug → Site by listing + filtering client-side. The
+// backend doesn't expose a /api/sites/by-slug/{slug} endpoint today; a list
+// hop is cheap (one tenant rarely has more than a handful of sites).
+func (c *Client) FindSite(ctx context.Context, slug string) (*Site, error) {
+	all, err := c.ListSites(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range all {
+		if all[i].Slug == slug {
+			return &all[i], nil
+		}
+	}
+	return nil, fmt.Errorf("no site with slug %q on this account (run `aegean sites list`)", slug)
+}
+
+// CreateSite POSTs a new Site row.
+func (c *Client) CreateSite(ctx context.Context, in SiteInput) (*Site, error) {
+	var out Site
+	if err := c.Do(ctx, http.MethodPost, "/api/sites", in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdateSite PUTs a full Site payload.
+func (c *Client) UpdateSite(ctx context.Context, siteID string, in SiteInput) (*Site, error) {
+	var out Site
+	if err := c.Do(ctx, http.MethodPut, "/api/sites/"+url.PathEscape(siteID), in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteSite removes the Site row. 204 on success.
+func (c *Client) DeleteSite(ctx context.Context, siteID string) error {
+	return c.Do(ctx, http.MethodDelete, "/api/sites/"+url.PathEscape(siteID), nil, nil)
+}
+
+// DeploySite uploads a zip bundle. The backend extracts + activates atomically.
+// notes is optional (shows up in `aegean sites history`).
+func (c *Client) DeploySite(ctx context.Context, siteID string, zipBytes []byte, zipName, notes string) (*SiteDeployment, error) {
+	var out SiteDeployment
+	fields := map[string]string{}
+	if notes != "" {
+		fields["notes"] = notes
+	}
+	if err := c.DoMultipart(ctx,
+		"/api/sites/"+url.PathEscape(siteID)+"/deployments",
+		"file", zipName, zipBytes, "application/zip", fields, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListSiteDeployments returns the per-Site deployment ledger, newest first.
+func (c *Client) ListSiteDeployments(ctx context.Context, siteID string) ([]SiteDeployment, error) {
+	var out []SiteDeployment
+	if err := c.Do(ctx, http.MethodGet,
+		"/api/sites/"+url.PathEscape(siteID)+"/deployments", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ActivateDeployment flips the Site's active pointer at a prior deployment
+// (rollback / roll-forward).
+func (c *Client) ActivateDeployment(ctx context.Context, siteID, deploymentID string) error {
+	return c.Do(ctx, http.MethodPost,
+		"/api/sites/"+url.PathEscape(siteID)+"/activate/"+url.PathEscape(deploymentID),
+		nil, nil)
+}

@@ -15,7 +15,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strings"
 	"time"
 )
@@ -130,4 +132,93 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// DoMultipart streams a multipart/form-data POST. Used today by
+// `aegean sites deploy` to ship a bundle zip; future uploads (CLI
+// attachments, templates) can reuse it. fileName is the form name of
+// the file part ("file" for /api/sites/{id}/deployments); fileBytes
+// is the entire payload, contentType the file's MIME, fields any
+// additional plain-text form fields (e.g. notes=…).
+//
+// We pull the whole payload in memory before dispatch — fine because
+// the backend caps bundles at 250 MB and the CLI doesn't have any
+// other multipart use case yet. If we ever ship 1 GB uploads we'll
+// switch to io.Pipe streaming and a longer client timeout.
+func (c *Client) DoMultipart(ctx context.Context, path, fileFieldName, fileName string,
+	fileBytes []byte, fileContentType string, fields map[string]string, out any) error {
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	for k, v := range fields {
+		if err := mw.WriteField(k, v); err != nil {
+			return fmt.Errorf("write field %q: %w", k, err)
+		}
+	}
+
+	hdr := make(textproto.MIMEHeader)
+	hdr.Set("Content-Disposition",
+		fmt.Sprintf(`form-data; name=%q; filename=%q`, fileFieldName, fileName))
+	if fileContentType != "" {
+		hdr.Set("Content-Type", fileContentType)
+	}
+	part, err := mw.CreatePart(hdr)
+	if err != nil {
+		return fmt.Errorf("create file part: %w", err)
+	}
+	if _, err := part.Write(fileBytes); err != nil {
+		return fmt.Errorf("write file part: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, &buf)
+	if err != nil {
+		return fmt.Errorf("build POST %s: %w", path, err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Accept", "application/json")
+	if c.UserAgent != "" {
+		req.Header.Set("User-Agent", c.UserAgent)
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	if c.APIKey != "" {
+		req.Header.Set("X-API-Key", c.APIKey)
+	}
+
+	// Bundle uploads can take a minute on a slow link or a fresh
+	// 250 MB zip — temporarily bump the timeout on a per-call basis
+	// rather than mutating the shared client.
+	deadline, hasDeadline := ctx.Deadline()
+	if !hasDeadline || time.Until(deadline) < 2*time.Minute {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+		req = req.WithContext(ctx)
+	}
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return fmt.Errorf("read POST %s response: %w", path, readErr)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &ErrAPI{Status: resp.StatusCode, Method: http.MethodPost, Path: path, Body: string(respBytes)}
+	}
+	if out == nil || resp.StatusCode == http.StatusNoContent || len(respBytes) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(respBytes, out); err != nil {
+		return fmt.Errorf("decode POST %s response: %w (body: %s)", path, err, truncate(string(respBytes), 200))
+	}
+	return nil
 }

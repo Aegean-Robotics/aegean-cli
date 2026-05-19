@@ -117,3 +117,48 @@ type LogsPage struct {
 	Last          bool       `json:"last"`
 	NumberOfElements int     `json:"numberOfElements"`
 }
+
+// ─── Static sites (Phase 1-4b) ───────────────────────────────────────────────
+
+// Site mirrors the backend's Site entity JSON shape.
+type Site struct {
+	ID                  string    `json:"id"`
+	Slug                string    `json:"slug"`
+	BucketName          string    `json:"bucketName"`
+	KeyPrefix           string    `json:"keyPrefix"`
+	IndexDocument       string    `json:"indexDocument"`
+	ErrorDocument       string    `json:"errorDocument"`
+	SpaFallback         bool      `json:"spaFallback"`
+	DefaultCacheMaxAge  int       `json:"defaultCacheMaxAge"`
+	Enabled             bool      `json:"enabled"`
+	CustomDomain        string    `json:"customDomain,omitempty"`
+	PreferredSubdomain  string    `json:"preferredSubdomain,omitempty"`
+	CreatedAt           time.Time `json:"createdAt"`
+	UpdatedAt           time.Time `json:"updatedAt"`
+}
+
+// SiteInput is the create/update payload — matches SiteService.SiteInput on
+// the backend. Pointer fields stay omitempty-clean so an unset bool doesn't
+// flip the persisted value to false.
+type SiteInput struct {
+	Slug                string `json:"slug"`
+	BucketName          string `json:"bucketName"`
+	KeyPrefix           string `json:"keyPrefix,omitempty"`
+	IndexDocument       string `json:"indexDocument,omitempty"`
+	ErrorDocument       string `json:"errorDocument,omitempty"`
+	SpaFallback         *bool  `json:"spaFallback,omitempty"`
+	DefaultCacheMaxAge  *int   `json:"defaultCacheMaxAge,omitempty"`
+	Enabled             *bool  `json:"enabled,omitempty"`
+	CustomDomain        string `json:"customDomain,omitempty"`
+	PreferredSubdomain  string `json:"preferredSubdomain,omitempty"`
+}
+
+// SiteDeployment is the per-bundle ledger row — one per `aegean sites deploy`.
+type SiteDeployment struct {
+	ID               string    `json:"id"`
+	DeploymentPrefix string    `json:"deploymentPrefix"`
+	BytesTotal       int64     `json:"bytesTotal"`
+	FileCount        int       `json:"fileCount"`
+	Notes            string    `json:"notes,omitempty"`
+	CreatedAt        time.Time `json:"createdAt"`
+}
