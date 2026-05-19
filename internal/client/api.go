@@ -112,6 +112,19 @@ func (c *Client) ListLogs(ctx context.Context, page, size int) (*LogsPage, error
 	return &out, nil
 }
 
+// ─── Account ─────────────────────────────────────────────────────────────────
+
+// CurrentAccount returns the calling user's account + membership in the
+// account scoped by the JWT. Used by `aegean sites deploy` to print the
+// real path URL post-deploy instead of a <your-alias> placeholder.
+func (c *Client) CurrentAccount(ctx context.Context) (*AccountView, error) {
+	var out AccountView
+	if err := c.Do(ctx, http.MethodGet, "/v1/account", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ─── Sites (Phase 1-4b) ──────────────────────────────────────────────────────
 
 // ListSites returns every Site visible to the current account.

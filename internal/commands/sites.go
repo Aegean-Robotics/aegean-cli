@@ -24,6 +24,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,11 @@ import (
 	"github.com/Aegean-Robotics/aegean-cli/internal/output"
 	"github.com/spf13/cobra"
 )
+
+// maxBundleBytes mirrors SiteDeploymentService.MAX_BUNDLE_BYTES on the
+// backend. We pre-check client-side so the user gets a clear error
+// before burning upload bandwidth on a payload the API will reject.
+const maxBundleBytes int64 = 250 * 1024 * 1024
 
 func newSitesCmd(flags *GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
@@ -287,9 +293,17 @@ func newSitesDeployCmd(flags *GlobalFlags) *cobra.Command {
 				}
 			}
 
+			// Client-side size precheck — mirrors the backend's 250 MB
+			// MAX_BUNDLE_BYTES so the user gets a clear error instead of
+			// burning bandwidth on an upload the API will 4xx.
+			if int64(len(zipBytes)) > maxBundleBytes {
+				return fmt.Errorf("bundle is %s, exceeds the 250 MB backend cap — split or trim before retrying",
+					humanBytes(int64(len(zipBytes))))
+			}
+
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"→ deploying %s (%d bytes) to site %s\n",
-				zipName, len(zipBytes), slugUsed,
+				"→ deploying %s (%s) to site %s\n",
+				zipName, humanBytes(int64(len(zipBytes))), slugUsed,
 			)
 
 			dep, err := sess.client.DeploySite(context.Background(), siteID, zipBytes, zipName, notes)
@@ -303,11 +317,37 @@ func newSitesDeployCmd(flags *GlobalFlags) *cobra.Command {
 			case output.FormatYAML:
 				return output.YAML(cmd.OutOrStdout(), dep)
 			}
+
+			// Try to print the real path URL. Best-effort — if the
+			// /v1/account fetch fails (older backend, token quirk), we
+			// fall back to <your-alias> + a hint.
+			alias, aliasErr := fetchAccountAlias(sess.client)
+			endpointHost := strings.TrimPrefix(strings.TrimPrefix(sess.cfg.Endpoint, "https://"), "http://")
+			browserHost := strings.Replace(endpointHost, "api.", "", 1)
+			if browserHost == endpointHost {
+				// Endpoint doesn't follow the api.<env> convention (local
+				// docker compose, custom dev box). Stick with the raw form.
+				browserHost = endpointHost
+			}
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"✓ deployment %s — %d files, %d bytes\n  open: https://%s/sites/<your-alias>/%s/\n"+
-					"        (or the wildcard URL once *.sites.* DNS+TLS is provisioned)\n",
-				dep.ID, dep.FileCount, dep.BytesTotal, strings.TrimPrefix(sess.cfg.Endpoint, "https://"), slugUsed,
+				"✓ deployment %s — %d files, %s\n",
+				dep.ID, dep.FileCount, humanBytes(dep.BytesTotal),
 			)
+			if aliasErr == nil && alias != "" {
+				wildcardLabel := alias + "-" + slugUsed
+				fmt.Fprintf(cmd.OutOrStdout(),
+					"  path URL    : https://%s/sites/%s/%s/\n"+
+						"  wildcard URL: https://%s.sites.%s/  (live once *.sites.* DNS+TLS is provisioned)\n",
+					browserHost, url.PathEscape(alias), url.PathEscape(slugUsed),
+					wildcardLabel, strings.TrimPrefix(browserHost, ""),
+				)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(),
+					"  open: https://%s/sites/<your-alias>/%s/\n"+
+						"        (or the wildcard URL once *.sites.* DNS+TLS is provisioned)\n",
+					browserHost, slugUsed,
+				)
+			}
 			return nil
 		},
 	}
@@ -497,4 +537,35 @@ func zipDirectory(root string) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// fetchAccountAlias hits GET /v1/account and returns the alias. Best-effort —
+// the deploy command falls back to a placeholder when this errors so a
+// missing endpoint (older backend) or quirky token doesn't break the user's
+// happy path.
+func fetchAccountAlias(c *client.Client) (string, error) {
+	av, err := c.CurrentAccount(context.Background())
+	if err != nil {
+		return "", err
+	}
+	if av == nil {
+		return "", fmt.Errorf("empty account view")
+	}
+	return av.Alias, nil
+}
+
+// humanBytes formats a byte count as "X.Y MB" / "X KB" / "N B". Used in
+// deploy output so a 47 MB bundle reads as "47.0 MB" not "49283072 bytes".
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for n2 := n / unit; n2 >= unit; n2 /= unit {
+		div *= unit
+		exp++
+	}
+	suffix := []string{"KB", "MB", "GB", "TB"}[exp]
+	return fmt.Sprintf("%.1f %s", float64(n)/float64(div), suffix)
 }

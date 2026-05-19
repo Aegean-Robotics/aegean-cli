@@ -118,6 +118,21 @@ type LogsPage struct {
 	NumberOfElements int     `json:"numberOfElements"`
 }
 
+// ─── Account ─────────────────────────────────────────────────────────────────
+
+// AccountView mirrors AccountController.AccountView. Carries the alias the
+// dashboard + path URL surface key off — the CLI prints it after `aegean
+// sites deploy` so the user sees the live URL rather than a placeholder.
+type AccountView struct {
+	AccountID    string  `json:"accountId"`
+	Alias        string  `json:"alias"`
+	Name         string  `json:"name"`
+	PlanType     string  `json:"planType"`
+	Balance      float64 `json:"balance"`
+	MyRole       string  `json:"myRole"`
+	MembershipID string  `json:"membershipId"`
+}
+
 // ─── Static sites (Phase 1-4b) ───────────────────────────────────────────────
 
 // Site mirrors the backend's Site entity JSON shape.

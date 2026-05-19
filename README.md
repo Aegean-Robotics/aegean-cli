@@ -1,18 +1,31 @@
 # aegean — Aegean Cloud Engine CLI
 
-Single static binary for managing Aegean accounts, API keys, custom domains, and sending email/SMS/voice from the command line.
+Single static binary for managing Aegean accounts, API keys, custom domains, sending email/SMS/voice, and deploying static sites from the command line.
 
-Status: **scaffold only** (v0.1.0 in flight). See [`todo/aegean-cli-release-plan.md`](../../todo/aegean-cli-release-plan.md) for the full release plan.
+Releases at https://github.com/Aegean-Robotics/aegean-cli/releases. See [`todo/aegean-cli-release-plan.md`](../../todo/aegean-cli-release-plan.md) for the release-plan delta.
 
-## Install (planned channels)
+## Install
 
 ```bash
-brew install Aegean-Robotics/tap/aegean              # macOS — week 2
-curl -fsSL https://aegeanengine.com/install.sh | sh   # Linux/macOS — week 1
-sudo apt install aegean-cli                       # Debian/Ubuntu — week 4
-npm install -g @aegeanengine/cli                  # any Node host — week 3
-scoop install aegean                              # Windows — v0.2
+# Debian / Ubuntu — apt repo at api.aegeanengine.com/apt/
+echo 'deb [trusted=yes] https://api.aegeanengine.com/apt stable main' \
+    | sudo tee /etc/apt/sources.list.d/aegean.list
+sudo apt update && sudo apt install aegean-cli
+
+# macOS / Linuxbrew — Homebrew tap
+brew install Aegean-Robotics/tap/aegean
+
+# Linux / macOS — curl installer (signed tarball)
+curl -fsSL https://aegeanengine.com/install.sh | sh
+
+# Windows — Scoop (v0.2)
+scoop install aegean
+
+# Direct .deb / .rpm / .tar.gz / .zip from GitHub Releases
+#   https://github.com/Aegean-Robotics/aegean-cli/releases
 ```
+
+`[trusted=yes]` on the apt source is the v1 compromise — the repo isn't GPG-signed yet (Phase 2 of `todo/aegean-cli-release-plan.md`). Traffic is HTTPS so an attacker would still need to break TLS.
 
 ## Local build
 
